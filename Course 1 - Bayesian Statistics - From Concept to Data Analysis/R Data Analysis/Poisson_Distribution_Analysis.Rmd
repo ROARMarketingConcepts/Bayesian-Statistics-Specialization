@@ -1,0 +1,68 @@
+---
+title: "Poisson Distribution Analysis"
+author: "Ken Wood"
+date: "2023-07-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### The Poisson likelihood is often used to model count data since Poisson random variables are integer-valued, starting at 0.
+
+Example scenario where could we appropriately model with a Poisson likelihood?
+
+**Predicting the number of goals scored in a hockey match.**
+
+Each of the following gamma distributions is being considered as a prior for a Poisson mean 
+$\lambda$. All have the same mean of 4. Which one expresses the most confidence in this prior mean? Equivalently, which has the greatest effective prior sample size?
+
+$\Gamma(1,1/4)$
+
+$\Gamma(2,1/2)$
+
+$\Gamma(5,5/4)$
+
+$\Gamma(20,5)$ 
+Correct - Of the four choices, this prior has the smallest standard deviation (0.89). It also has the largest effective sample size (5).
+
+**Consider the chocolate chip cookie example from the lesson. As in the lesson, we use the Poisson likelihood to model the number of chips per cookie, and a conjugate gamma prior on $\lambda$, the expected number of chips per cookie. Suppose our prior expection is $\lambda=8$.**
+
+1. The conjugate prior with mean 8 and effective sample size of 2 is $\Gamma(a,2)$. Find the value of $a$.   **Answer: mean = $\alpha/\beta = 8,\space a/2 = 8,\space a=16$** 
+
+2. The conjugate prior with mean 8 and standard deviation of 1 is $\Gamma(a,8)$. Find the value of $a$.   **Answer: stddev = $\sqrt\alpha/\beta = 1,\space \sqrt a/8 = 1,\space \sqrt a = 8,  \space a=64$**
+
+3. Suppose we are not very confident in our prior guess of 8, so we want to use an effective sample size of 1/100 cookies.  Then the conjugate prior is $\Gamma(a,0.01)$. Find the value of $a$.  **Answer: mean = $\alpha/\beta = 8,\space a/0.01 = 8,\space a=0.08$**
+
+4. Suppose we decide on a prior $\Gamma(8,1)$, which has a prior mean of 8 and sample size of 1 cookie.  We collect data, sampling 5 cookies and counting the chips in each. We find 9, 12, 10, 15 and 13 chips.  What is the posterior distribution for $\lambda$? 
+**Answer: posterior is $\Gamma(\alpha+\Sigma y_i, \beta+n) = \Gamma(59+8, 1+5) = \Gamma(67,6)$**
+
+```{r}
+chips_count <- list(c(9,12,10,15,13))
+sapply(chips_count,sum)
+```
+
+5. What do the plots of the prior density (dotted line) and posterior density (solid line) look like?
+
+```{r}
+lambda=seq(from=0,to=20,by=.01)
+plot(lambda,dgamma(lambda,67,6),type="l",ylab='f(lambda | y)')
+lines(lambda,dgamma(lambda,8,1),type="l",lty=2)
+```
+
+6. What is the posterior mean for $\lambda$?
+
+<p style="text-align: center;">$\bar{\lambda}_{posterior} = (\alpha+\Sigma y_i)/(\beta+n)= (\beta/(\beta+n))(\alpha/\beta)+(n/(\beta+n))(\Sigma y_i/n)$</p>
+<p style="text-align: center;">$\bar{\lambda}_{posterior} = (59+8)/(1+5)$</p>
+
+```{r}
+(59+8)/(1+5)
+```
+
+7. Find the lower end of a 90% equal-tailed credible interval for $\lambda$.
+
+```{r}
+qgamma(.05,67,6)
+```
+

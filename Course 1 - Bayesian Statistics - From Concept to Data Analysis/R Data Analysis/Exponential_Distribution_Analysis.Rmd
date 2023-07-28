@@ -1,0 +1,83 @@
+---
+title: "Exponential Distribution Analysis"
+author: "Ken Wood"
+date: "2023-07-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### The exponential distribution is the probability distribution of the time between events in a Poisson point process, i.e., a process in which events occur continuously and independently at a constant average rate. It is a particular case of the gamma distribution.
+
+$Y \sim Exp(\lambda)$   with conjugate $Gamma$ function.
+
+**prior:** $\lambda \sim Gamma(\alpha,\beta), \space$,mean $=1/\lambda = \alpha/\beta, \space$ stddev $=1/\alpha$
+
+**posterior:** $\lambda|y \sim Gamma(\alpha,\beta) = Gamma(a+n,b+\Sigma y_i),\space$ mean $=(a+n)/(b+\Sigma y_i)$
+
+**Consider the chocolate chip cookie example from the lesson. As in the lesson, we use the Poisson likelihood to model the number of chips per cookie, and a conjugate gamma prior on $\lambda$, the expected number of chips per cookie. Suppose our prior expection is $\lambda=8$.**
+
+1. Recall that we used the conjugate $Gamma$ prior for $\lambda$, the arrival rate of busses per minute. Suppose our prior belief about this rate is that it should have mean 1/20 arrivals per minute with standard deviation of 1/5.  Then the prior is $Gamma(a,b)$ with $a=1/16$. Find the balue of $b$.  **Answer: mean = $a/b = 1/20,\space b=20a = 20/16 = 1.25$** 
+
+2. Suppose that we wish to use a prior with the same mean (1/20), but with an effective sample size of one arrival.  Then the prior for $\lambda$ is $Gamma(1,20)$. In addition to the original $Y_1=12, we observe the waiting times for four additional buses: $Y_2=15, Y_3=8, Y_4=13.5, Y_5=25$. Recall that with multiple (independent) observations, the posterior for $\lambda$ is $Gamma(\alpha,\beta)$ where $\alpha=a+n$ and $\beta=b+\Sigma y_i$ What is the posterior mean for $\lambda$?  
+
+* **Answer: mean $=(a+n)/(b+\Sigma y_i) = (1+5)/(20+73.5)$**
+
+```{r}
+(1+5)/(20+73.5)
+```
+
+3. Find the posterior probability that $\lambda < 1/10$.   
+
+```{r}
+pgamma(0.1,1+5,20+73.5)
+```
+
+
+4. Suppose we decide on a prior $\Gamma(8,1)$, which has a prior mean of 8 and sample size of 1 cookie.  We collect data, sampling 5 cookies and counting the chips in each. We find 9, 12, 10, 15 and 13 chips.  What is the posterior distribution for $\lambda$? 
+**Answer: posterior is $\Gamma(\alpha+\Sigma y_i, \beta+n) = \Gamma(59+8, 1+5) = \Gamma(67,6)$**
+
+```{r}
+chips_count <- list(c(9,12,10,15,13))
+sapply(chips_count,sum)
+```
+
+5. What do the plots of the prior density (dotted line) and posterior density (solid line) look like?
+
+```{r}
+lambda=seq(from=0,to=20,by=.01)
+plot(lambda,dgamma(lambda,67,6),type="l",ylab='f(lambda | y)')
+lines(lambda,dgamma(lambda,8,1),type="l",lty=2)
+```
+
+6. What is the posterior mean for $\lambda$?
+
+<p style="text-align: center;">$\bar{\lambda}_{posterior} = (\alpha+\Sigma y_i)/(\beta+n)= (\beta/(\beta+n))(\alpha/\beta)+(n/(\beta+n))(\Sigma y_i/n)$</p>
+<p style="text-align: center;">$\bar{\lambda}_{posterior} = (59+8)/(1+5)$</p>
+
+```{r}
+(59+8)/(1+5)
+```
+
+7. Find the lower end of a 90% equal-tailed credible interval for $\lambda$.
+
+```{r}
+qgamma(.05,67,6)
+```
+
+```{r}
+(1+5)/(20+61.5)
+```
+
+
+```{r}
+qgamma(.975,9,390)
+```
+
+```{r}
+y=seq(from=0,to=120,by=0.5)
+plot(y,dgamma(y,9,390),type="l")
+```
+

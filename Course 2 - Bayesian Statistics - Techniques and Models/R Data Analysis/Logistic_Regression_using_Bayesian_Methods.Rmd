@@ -1,0 +1,379 @@
+---
+title: "Logistic Regression using Bayesian Methods"
+author: "Ken Wood"
+date: "2023-07-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Data
+
+For an example of logistic regression, we’ll use the urine data set from the boot package in `R`. The response variable is r, which takes on values of $0$ or $1$. We will remove some rows from the data set which contain missing values.
+
+```{r}
+library("boot")
+data("urine")
+?urine
+head(urine)
+dat = na.omit(urine)
+```
+
+Let’s look at pairwise scatter plots of the seven variables.
+
+```{r}
+pairs(dat)
+```
+
+One thing that stands out is that several of these variables are strongly correlated with one another. For example gravity and osmo appear to have a very close linear relationship. Collinearity between $x$ variables in linear regression models can cause trouble for statistical inference. Two correlated variables will compete for the ability to predict the response variable, leading to unstable estimates. This is not a problem for prediction of the response, if prediction is the end goal of the model. But if our objective is to discover how the variables relate to the response, we should avoid collinearity.
+
+We can more formally estimate the correlation among these variables using the corrplot package.
+
+```{r}
+library("corrplot")
+Cor = cor(dat)
+corrplot(Cor, type="upper", method="ellipse", tl.pos="d")
+corrplot(Cor, type="lower", method="number", col="black", 
+         add=TRUE, diag=FALSE, tl.pos="n", cl.pos="n")
+```
+
+#### Variable selection
+
+One primary goal of this analysis is to find out which variables are related to the presence of calcium oxalate crystals. This objective is often called “variable selection.” We have already seen one way to do this: fit several models that include different sets of variables and see which one has the best DIC. Another way to do this is to use a linear model where the priors for the $\beta$ coefficients favor values near $0$ (indicating a weak relationship). This way, the burden of establishing association lies with the data. If there is not a strong signal, we assume it doesn’t exist.
+
+Rather than tailoring a prior for each individual $\beta$ based on the scale its covariate takes values on, it is customary to subtract the mean and divide by the standard deviation for each variable.
+
+```{r}
+X = scale(dat[,-1], center=TRUE, scale=TRUE)
+head(X)
+head(X[,"gravity"])
+colMeans(X)
+```
+
+`apply(X, MARGIN, FUN)`
+
+Here:
+
+* x: an array or matrix
+* MARGIN:  take a value or range between $1$ and $2$ to define where to apply the function:
+    * MARGIN=1: the manipulation is performed on rows
+    * MARGIN=2: the manipulation is performed on columns
+    * MARGIN=c(1,2)` the manipulation is performed on rows and columns
+* FUN: tells which function to apply. Built functions like mean, median, sum, min, max and even user-defined functions can be applied
+
+```{r}
+apply(X, 2, sd)
+```
+
+### Model
+
+Our prior for the $\beta$ (which we’ll call $b$ in the model) coefficients will be the double exponential (or Laplace) distribution, which as the name implies, is the exponential distribution with tails extending in the positive direction as well as the negative direction, with a sharp peak at $0$. We can read more about it in the `JAGS` manual. The distribution looks like:
+
+```{r}
+ddexp = function(x, mu, tau) {
+  0.5*tau*exp(-tau*abs(x-mu)) 
+}
+curve(ddexp(x, mu=0.0, tau=1.0), from=-5.0, to=5.0, ylab="density", main="Double exponential\ndistribution") # double exponential distribution
+curve(dnorm(x, mean=0.0, sd=1.0), from=-5.0, to=5.0, lty=2, add=TRUE) # normal distribution
+legend("topright", legend=c("double exponential", "normal"), lty=c(1,2), bty="n")
+```
+
+```{r}
+library("rjags")
+
+mod1_string = " model {
+    for (i in 1:length(y)) {
+        y[i] ~ dbern(p[i])
+        logit(p[i]) = int + b[1]*gravity[i] + b[2]*ph[i] + b[3]*osmo[i] + b[4]*cond[i] + b[5]*urea[i] + b[6]*calc[i]
+    }
+    int ~ dnorm(0.0, 1.0/25.0)
+    for (j in 1:6) {
+        b[j] ~ ddexp(0.0, sqrt(2.0)) # has variance 1.0
+    }
+} "
+
+set.seed(92)
+head(X)
+
+data_jags = list(y=dat$r, gravity=X[,"gravity"], ph=X[,"ph"], osmo=X[,"osmo"], cond=X[,"cond"], urea=X[,"urea"], calc=X[,"calc"])
+
+params = c("int", "b")
+
+mod1 = jags.model(textConnection(mod1_string), data=data_jags, n.chains=3)
+update(mod1, 1e3)
+
+mod1_sim = coda.samples(model=mod1,
+                        variable.names=params,
+                        n.iter=5e3)
+mod1_csim = as.mcmc(do.call(rbind, mod1_sim))
+
+## convergence diagnostics
+plot(mod1_sim, ask=TRUE)
+
+gelman.diag(mod1_sim)
+autocorr.diag(mod1_sim)
+autocorr.plot(mod1_sim)
+effectiveSize(mod1_sim)
+
+## calculate DIC
+dic1 = dic.samples(mod1, n.iter=1e3)
+```
+
+Let’s look at the results.
+
+```{r}
+summary(mod1_sim)
+par(mfrow=c(3,2))
+densplot(mod1_csim[,1:6], xlim=c(-3.0, 3.0))
+colnames(X) # variable names 
+```
+
+It is clear that the coefficients for variables `gravity`, `cond` (conductivity), and `calc` (calcium concentration) are not $0$. The posterior distribution for the coefficient of `osmo` (osmolarity) looks like the prior, and is almost centered on $0$ still, so we’ll conclude that `osmo` is not a strong predictor of calcium oxalate crystals. The same goes for `ph`.
+
+`urea` (urea concentration) appears to be a borderline case. However, if we refer back to our correlations among the variables, we see that `urea` is highly correlated with `gravity`, so we opt to remove it.
+
+Our second model looks like this:
+
+```{r}
+  mod2_string = " model {
+    for (i in 1:length(y)) {
+        y[i] ~ dbern(p[i])
+        logit(p[i]) = int + b[1]*gravity[i] + b[2]*cond[i] + b[3]*calc[i]
+    }
+    int ~ dnorm(0.0, 1.0/25.0)
+    for (j in 1:3) {
+        b[j] ~ dnorm(0.0, 1.0/25.0) # noninformative for logistic regression
+    }
+} "
+
+mod2 = jags.model(textConnection(mod2_string), data=data_jags, n.chains=3)
+
+update(mod2, 1e3)
+
+mod2_sim = coda.samples(model=mod2,
+                        variable.names=params,
+                        n.iter=5e3)
+mod2_csim = as.mcmc(do.call(rbind, mod2_sim))
+
+plot(mod2_sim, ask=TRUE)
+
+gelman.diag(mod2_sim)
+autocorr.diag(mod2_sim)
+autocorr.plot(mod2_sim)
+effectiveSize(mod2_sim)
+
+dic2 = dic.samples(mod2, n.iter=1e3)
+```
+
+### Results
+
+```{r}
+dic1
+dic2
+summary(mod2_sim)
+HPDinterval(mod2_csim)
+par(mfrow=c(3,1))
+densplot(mod2_csim[,1:3], xlim=c(-3.0, 3.0))
+colnames(X)[c(1,4,6)] # variable names
+```
+
+The DIC is actually better for the first model. Note that we did change the prior between models, and generally we should not use the DIC to choose between priors. Hence comparing DIC between these two models may not be a fair comparison. Nevertheless, they both yield essentially the same conclusions. Higher values of `gravity` and `calc` (calcium concentration) are associated with higher probabilities of calcium oxalate crystals, while higher values of `cond` (conductivity) are associated with lower probabilities of calcium oxalate crystals.
+
+There are more modeling options in this scenario, perhaps including transformations of variables, different priors, and interactions between the predictors, but we’ll leave it to you to see if you can improve the model.
+
+### Prediction from a logistic regression model
+
+How do we turn model parameter estimates into model predictions? The key is the form of the model. Remember that the likelihood is Bernoulli, which is $1$ with probability $p$. We modeled the logit of $p$ as a linear model, which we showed in the first segment of this lesson leads to an exponential form for $E(y)=p$.
+
+Take the output from our model in the last segment. We will use the posterior means as point estimates of the parameters.
+
+```{r}
+(pm_coef = colMeans(mod2_csim))
+```
+
+The posterior mean of the intercept was about $−0.15$. Since we centered and scaled all of the covariates, values of $0$ for each $x$ correspond to the average values. Therefore, if we use our last model, then our point estimate for the probability of calcium oxalate crystals when `gravity`, `cond`, and `calc` are at their average values is $1/(1+e^{-0.15})= 0.4625702$.
+
+Now suppose we want to make a prediction for a new specimen whose value of gravity is average, whose value of cond is one standard deviation below the mean, and whose value of calc is one standard deviation above the mean. Our point estimate for the probability of calcium oxalate crystals is $1/(1+e^{−(−0.15+1.4∗0.0−1.3∗(−1.0)+1.9∗(1.0))})= 0.9547825$.
+
+If we want to make predictions in terms of the original $x$ variable values, we have two options:
+
+* For each $x$ variable, subtract the mean and divide by the standard deviation for that variable in the original data set used to fit the model.
+
+* Re-fit the model without centering and scaling the covariates.
+
+#### Predictive checks
+We can use the same ideas to make predictions for each of the original data points. This is similar to what we did to calculate residuals with earlier models.
+
+First we take the $X$ matrix and matrix multiply it with the posterior means of the coefficients. Then we need to pass these linear values through the inverse of the link function as we did above.
+
+```{r}
+pm_Xb = pm_coef["int"] + X[,c(1,4,6)] %*% pm_coef[1:3]
+phat = 1.0 / (1.0 + exp(-pm_Xb))
+head(phat)
+```
+
+These `phat` values are the model’s predicted probability of calcium oxalate crystals for each data point. We can get a rough idea of how successful the model is by plotting these predicted values against the actual outcome.
+
+```{r}
+plot(phat, jitter(dat$r))
+```
+
+Suppose we choose a cutoff for these predicted probabilities. If the model tells us the probability is $> 0.5$, we will classify the observation as a $1$ and, if it is $< 0.5$, we will classify it as a $0$. That way the model classifies each data point. Now we can tabulate these classifications against the truth to see how well the model predicts the original data.
+
+```{r}
+(tab0.5 = table(phat > 0.5, data_jags$y))
+sum(diag(tab0.5)) / sum(tab0.5)
+```
+
+The correct classification rate is about 76%, not too bad, but not great.
+
+Now suppose that it is considered really bad to predict no calcium oxalate crystal when there in fact is one. We might then choose to lower our threshold for classifying data points as $1$s. Say we change it to $0.3$. That is, if the model says the probability is $> 0.3$, we will classify it as having a calcium oxalate crystal.
+
+```{r}
+(tab0.3 = table(phat > 0.3, data_jags$y))
+sum(diag(tab0.3)) / sum(tab0.3)
+```
+
+It looks like we gave up a little classification accuracy, but we did indeed increase our chances of detecting a true positive.
+
+We could repeat this exercise for many thresholds between $0$ and $1$, and each time calculate our error rates. This is equivalent to calculating what is called the **ROC (receiver-operating characteristic)** curve, which is often used to evaluate classification techniques.
+
+These classification tables we have calculated were all in-sample. They were predicting for the same data used to fit the model. We could get a less biased assessment of how well our model performs if we calculated these tables for data that were not used to fit the model. For example, before fitting the model, you could withhold a set of randomly selected “test” data points, and use the model fit to the rest of the “training” data to make predictions on your “test” set.
+
+### Quiz
+
+What is the advantage of using a link function such as the logit transform for logistic regression?  **Answer:**  It ensures the success probability ($E(y)$ if $y$ is Bernoulli) is between $0$ and $1$ without requiring any constraints on the $x$ variables or the $\beta$ coefficients.
+
+Logistic regression works with binomial likelihoods in addition to Bernoulli likelihoods. If the response, $y_i$, is a number of successes in $n_i$ independent trials each with $\phi_i$ success probability, we can still model $\phi_i$ with a linear model using the logit transformation.
+
+As an example, consider the OME data in the `MASS` package in `R`. The data consist of experimental results from tests of auditory perception in children. Under varying conditions and for multiple trials under each condition, children either correctly or incorrectly identified the source of changing signals.
+
+Although the independence of the trials and results are questionable, we'll try fitting a logistic regression to these data. First, we'll explore the relationships briefly with the following code:
+
+```{r}
+library("MASS")
+data("OME")
+?OME # background on the data
+head(OME)
+
+any(is.na(OME)) # check for missing values
+dat = subset(OME, OME != "N/A") # manually remove OME missing values identified with "N/A"
+dat$OME = factor(dat$OME)
+str(dat)
+
+plot(dat$Age, dat$Correct / dat$Trials )
+plot(dat$OME, dat$Correct / dat$Trials )
+plot(dat$Loud, dat$Correct / dat$Trials )
+plot(dat$Noise, dat$Correct / dat$Trials )
+```
+
+We are interested how these variables relate to the probability of successfully identifying the source of changes in sound.  Of these four variables, which appears to have the weakest association with the probability of success? 
+
+Answer: OME because the box plots for the two levels of OME are nearly indistinguishable.
+
+Next, we'll fit a reference logistic model with noninformative prior in `R`. We can do this with the `glm` function, providing the model formula as with the usual `lm`, except now the response of the observed proportion of correct responses. We must also indicate how many trials were run for each experiment using the `weights` argument.
+
+```{r}
+mod_glm = glm(Correct/Trials ~ Age + OME + Loud + Noise, data=dat, weights=Trials, family="binomial")
+summary(mod_glm)
+```
+
+To get an idea of how the model fits, we can create residual (using a special type of residual for non-normal likelihoods) and in-sample prediction plots.
+
+```{r}
+plot(residuals(mod_glm, type="deviance"))
+plot(fitted(mod_glm), dat$Correct/dat$Trials)
+```
+
+It appears from the second plot that the model is not very precise (some model predictions were far from the observed proportion of correct responses.) Nevertheless, it can be informative about the relationships among the variables.
+
+Report the posterior mode estimate of the coefficient for `lowOME`. The coefficient will be found in the model summary.
+
+Next, we will fit a similar model in `JAGS`. To make results comparable to those of the reference model, we will use the same configuration of covariates. We can extract this information from the reference model using `model.matrix`.
+
+```{r}
+X = model.matrix(mod_glm)[,-1] # -1 removes the column of 1s for the intercept
+head(X)
+```
+
+The data include categorical covariates which `R` codes as dummy variables (as with ANOVA). Hence we have an indicator variable for whether OME is at its low level and another indicating whether the Noise is incoherent. The intercept is then associated with this baseline group. Ignoring the continuous variables `Age` and `Loud`, what are the characteristics of this baseline group?  
+
+**Answer:** The intercept is associated with values of $0$ for all covariates. In this case, we have `OMElow`: $0$ for high, $1$ for low; `Noiseincoherent`: $0$ for coherent, $1$ for incoherent.  Therefore high OME and coherent sound.
+
+We now fit the `JAGS` model wiht the fairly noninformative priors given. Use three chains wiht at least 5000 iterations in each.
+
+```{r}
+mod3_string = " model {
+	for (i in 1:length(y)) {
+		y[i] ~ dbin(phi[i], n[i])
+		logit(phi[i]) = b0 + b[1]*Age[i] + b[2]*OMElow[i] + b[3]*Loud[i] + b[4]*Noiseincoherent[i]
+	}
+	
+	b0 ~ dnorm(0.0, 1.0/5.0^2)
+	for (j in 1:4) {
+		b[j] ~ dnorm(0.0, 1.0/4.0^2)
+	}
+	
+} "
+
+data_jags = as.list(as.data.frame(X))
+data_jags$y = dat$Correct # this will not work if there are missing values in dat (because they would be ignored by model.matrix). Always make sure that the data are accurately pre-processed for JAGS.
+data_jags$n = dat$Trials
+str(data_jags) # make sure that all variables have the same number of observations (712).
+
+params = c("b0","b")
+
+mod3 = jags.model(textConnection(mod3_string), data=data_jags, n.chains=3)
+
+update(mod3, 1e3)
+
+mod3_sim = coda.samples(model=mod3,
+                        variable.names=params,
+                        n.iter=5e3)
+mod3_csim = as.mcmc(do.call(rbind, mod3_sim))
+
+plot(mod3_sim, ask=TRUE)
+
+gelman.diag(mod3_sim)
+autocorr.diag(mod3_sim)
+autocorr.plot(mod3_sim)
+effectiveSize(mod3_sim)
+
+dic2 = dic.samples(mod3, n.iter=1e3)
+
+raftery.diag(mod3_csim)
+```
+
+We perform some MCMC diagnostic checks.  What does the Raftery and Lewis diagnostic (`raftery.diag()`) suggest about these chains?
+
+**Answer:** The dependence factor for many of the variables is large ($> 5.0$), indicating strong autocorrelation in the chains. We would require a large number of iterations to reliably produce 95% probability intervals for the parameters.
+
+Although `OMElow` is the predictor with the weakest statistical association to probability of correct responses, the posterior probability that its coefficient, $\beta_2$ is negative is still $> 0.9$.  How do we interpret this (most likely) negative coefficient in the context of our models?
+
+**Answer:** While holding all other predictors constant, low OME is associated with a lower probability of correct responses than high OME.
+
+Using the posterior means of the model coefficients, create a point estimate of the probability of correct responses for a child of age 60 months, high OME, using a coherent stimulus of 50 decibels.
+
+```{r}
+xb = -7.29+(0.02)*(60)+(-0.24)*(0)+(0.17)*(50)+(1.58)*(0)
+prob = 1/(1+exp(-xb))
+prob
+```
+
+Use the posterior mean estimates of the model coefficients to create point estimates of the probability of correct responses for each observation in the original data. To do this, follow the steps outlined in the lesson to create a vector of these probabilities called `phat` (using our notation from this quiz, it would be $\phi$).
+
+One we have `phat`, calculate the proportion of in-sample observations that are correctly classified according to the following criterion: the model prediction and observed correct response rate are either both higher than $0.7$ or both lower than $0.7$. 
+
+```{r}
+pm_coef = colMeans(mod3_csim)
+pm_coef
+pm_Xb = pm_coef["b0"] + X[] %*% pm_coef[1:4]
+phat = 1.0 / (1.0 + exp(-pm_Xb))
+head(phat)
+
+(tab0.7 = table(phat > 0.7, (dat$Correct / dat$Trials) > 0.7))
+sum(diag(tab0.7)) / sum(tab0.7)
+```
+

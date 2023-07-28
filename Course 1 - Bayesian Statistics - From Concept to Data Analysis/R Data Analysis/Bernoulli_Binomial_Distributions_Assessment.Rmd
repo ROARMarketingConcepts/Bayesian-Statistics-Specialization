@@ -1,0 +1,65 @@
+---
+title: "Bernoulli and Binomial Distributions"
+author: "Ken Wood"
+date: "2023-07-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Flipping a coin with unknown probability of heads ($\theta$)
+
+Suppose we use a Bernoulli likelihood for each coin flip, i.e., $f(y_i|\theta) = \theta^{y_i}(1-\theta)^{1-y_i}I_{(0\le\theta\le1)}$ for $y_i=0$ or $y_i=1$, and a uniform prior for $\theta$.
+
+**What is the posterior distribution for $\theta$ if we observe the following sequence $(T,T,T,T)$, where $H$ denotes $Y=1$ and $T$ denotes $Y=0$?**
+
+*Answer: the posterior distribution follows a $Beta$ function, $Beta(\Sigma y_i +1, n-\Sigma y_i+1) = Beta(1,5)$*
+
+*Posterior PDF of $\theta$:*
+
+```{r priors}
+theta=seq(from=0,to=1,by=.01)
+plot(theta,dbeta(theta,1,5),type="l")
+```
+
+```{r}
+0/4      # MLE
+1/(1+5)  # posterior mean
+```
+
+**Find the posterior probability that $\theta<0.5$ if we observe the sequence $(T,T,T,T)$.**
+```{r}
+pbeta(.5,1,5)
+```
+
+An engineer wants to assess the reliability of a new chemical refinement process by measuring $\theta$, the proportion of samples that fail a battery of tests. These tests are expensive and the budget only allows 20 tests on randomly-selected samples. Assuming each test is independent, she assigns a binomial likelihood where $X$ counts the samples that fail. Historically, new processes pass about half the time, so she assigns a $Beta(2,2)$ prior for $\theta$ (prior mean = 0.5 and prior sample size = 4).  The outcome of the tests is 6 fails and 14 passes.
+
+**What is the posterior distribution for $\theta$?**
+
+<p style="text-align: center;">Answer: $Beta(2+6, 2+20-6) = Beta(8,16)$</p>
+
+**Equal-tailed 95% credible interval**
+
+```{r}
+qbeta(.975,8,16)
+```
+
+The engineer tells you that the process is considered promising and can proceed to another phase of testing if we are 90% sure that the failure rate $\theta < 0.35$
+
+```{r}
+pbeta(0.35,8,16)
+```
+
+**Answer: Since $P(\theta < 0.35 |x) = 0.59 < 0.9$, so we cannot proceed.**
+
+It is discovered that the budget will allow 5 more samples to be tested. These tests are conducted and none of them fail.
+
+Calculate the new posterior probability $P(\theta <0.35|x_1,x_2)$. We can use the posterior from the previous analysis as the prior for this analysis. Assuming independence of tests, this yields the same posterior as in the analysis where we began with $Beta(2,2)$ as the prior and use all 25 tests as the data.
+
+```{r}
+pbeta(0.35,8,21)
+```
+
+**Answer: Since $P(\theta <0.35|x_1,x_2) = Beta(8,21)$ which is still $< 0.9$, so we still cannot proceed despite the fact that there were no additional failures.**

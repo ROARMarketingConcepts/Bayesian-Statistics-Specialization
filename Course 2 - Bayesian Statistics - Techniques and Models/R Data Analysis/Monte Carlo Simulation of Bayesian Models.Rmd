@@ -1,0 +1,205 @@
+---
+title: "Monte Carlo Simulation of Bayesian Models"
+author: "Ken Wood"
+date: "2023-07-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+$y_i=\mu+\epsilon_i,\space \space \epsilon \stackrel{iid}{\sim}N(0,\sigma^2),\space i=1,..,n$ 
+
+$\therefore \space y_i \stackrel{iid}{\sim}N(0,\sigma^2)$
+
+**Likelihood:**  $P(y|\theta) = \frac{P(y,\theta)}{P(\theta)}$,  where $P(\theta)$ is the **prior** probability distribution of $\theta$.
+
+**Posterior:** $P(\theta|y) = \frac{P(y,\theta)}{P(y)} = \frac{P(y,\theta)}{\int P(y,\theta) \space d\theta} = \frac{P(y|\theta)P(\theta)}{\int P(y|\theta)P(\theta) \space d\theta} = \frac{1}{K}P(y|\theta)P(\theta)$ 
+
+where $K$ is a constant and independent of $\theta$.
+
+
+
+#### Hierarchical Bayesian Model
+
+1. $\space \space y_i \stackrel{iid}{\sim}N(0,\sigma^2)$
+
+2. $\space \space \mu|\sigma^2 \sim N(\mu_0,\frac{\sigma_0^2}{\omega_0})$
+
+3. $\space \space \sigma^2 \sim \Gamma^{-1}(\alpha_{\space0},\beta_{\space0})$
+
+Let's look at the $Gamma$ distribution:
+
+```{r}
+set.seed(32)
+m=100
+a=2
+b=1/3
+```
+
+Get $m=100$ samples from the $Gamma$ distribution.
+
+```{r}
+theta=rgamma(n=m,shape=a,rate=b)
+head(theta)
+tail(theta)
+hist(theta,freq=FALSE)
+curve(dgamma(x,shape=a,rate=b), col='blue',add=TRUE)
+```
+
+Calculate mean of the simulated values for $\theta$:
+```{r}
+mean(theta)
+var(theta)
+```
+
+The mean and variance of a gamma distribution $\Gamma(a,b)$ is $\frac{a}{b}$ and $\frac{a}{b^2}$ respectively.
+
+```{r}
+a/b
+a/b^2
+```
+
+Looks like we need to get more samples for $\theta$.
+```{r}
+m=10000
+theta=rgamma(n=m,shape=a,rate=b)
+mean(theta)
+var(theta)
+```
+
+Let's look at $P(\theta < 5)$
+
+```{r}
+ind=theta<5
+head(ind)
+mean(ind) # Probability that theta < 5
+```
+
+Now, lets calculate $P(\theta<5)$ using the `pgamma` function.
+
+```{r}
+pgamma(q=5,shape=a,rate=b)
+```
+
+Now, lets take a look at the 90th percentile of $\theta$:
+
+```{r}
+quantile(theta,probs=0.9)
+```
+
+Now, lets the 90th percentile using the `qgamma` function.
+
+```{r}
+qgamma(0.9,shape=a,rate=b)
+```
+
+Let's calculate the standard error and confidence interval for $\theta$:
+
+```{r}
+std_error = sd(theta)/sqrt(m)
+lower = mean(theta)-std_error
+lower
+upper = mean(theta)+std_error
+upper
+```
+
+Lets go back to $P(\theta<5)$ using the `pgamma` function.
+
+```{r}
+ind=theta<5
+mean(ind) # Probability that theta < 5
+```
+
+```{r}
+pgamma(5,shape=a,rate=b)
+```
+
+Our Monte Carlo estimate of the probability is within 0.01 of the true mean.
+```{r}
+std_error=sd(ind)/sqrt(m)
+2*std_error
+```
+
+Now, let's simulate $\phi_i$ from $Beta(2,2)$, then we will simulate $y_i$ from $Binom(10,\phi_i)$
+
+```{r}
+m=1e5
+y=numeric(m)
+phi=numeric(m)
+```
+
+Now loop $i=1:m$ times to fill the $\phi_i$ and $y_i$ vectors using the `rbeta` and `rbinom` functions.
+
+```{r}
+# for (i in 1:m) {
+#  phi[i]=rbeta(1,shape1=2,shape2=2)
+#  y[i]=rbinom(n=1,size=10,prob=phi[i])
+#}
+```
+
+Loops are not particularly efficient, let's use vectorized code
+
+```{r}
+phi=rbeta(m,shape1=2,shape2=2)
+y=rbinom(n=m,size=10,prob=phi)
+```
+
+
+```{r}
+table(y)/m
+```
+
+```{r}
+plot(table(y)/m)
+```
+
+```{r}
+mean(y)
+```
+
+**Problem 1:** Laura keeps a record of her loan applications and performs a Bayesian analysis of her success rate, $\theta$. Her analysis yields a $Beta(5,3)$ posterior distribution for $\theta$.
+
+The posterior mean for $\theta = 5/(5+3) = 0.625$. However, Laura likes to think in terms of odds of succeeding, defined as $\frac{\theta}{1-\theta}$, the probability of success divided by the probability of failure.
+
+Simulate a large number of samples for the posterior distribution of $\theta$ and use these samples to approximate the posterior mean for Laura's odds of success, namely $E(\frac{\theta}{1-\theta})$.
+
+```{r}
+m=1e5
+a=5
+b=3
+theta=rbeta(m,shape1 = a,shape2 = b)
+mean(theta/(1-theta))
+```
+
+**Problem 2:** Laura also wants to know the posterior probability that her odds for success on loan applications is > 1 (in other words, better that 50:50 odds). 
+
+```{r}
+
+ind=(theta/(1-theta))>1
+mean(ind)
+
+# ind=(theta/(1-theta))<1
+# 1-mean(ind)
+```
+
+**Problem 3:** Use a (large) Monte Carlo sample to approximate the 0.3 quantile of the standard Normal distribution, $N(0,1)$, the number such that the probability of being less than 0.3. Use the `quantile` function in R. We can also check our answer using the `qnorm` function.
+
+```{r}
+m=1e6
+theta=rnorm(m,0,1)
+quantile(theta,probs=0.3)
+qnorm(0.3,0,1)
+```
+
+To measure how accurate our Monte Carlo approximations are, we can use the Central Limit Theorem (CLT). If the number of samples drawn, $m$, is large, then the Monte Carlo sample mean $\bar{\theta^*}$ used to estimate $E(\theta)$ approximately follows a normal distribution with mean $E(\theta)$ and variance $Var(\theta)/m$. If we substitute the sample variance for $Var(\theta)$, we can get a rough estimate of our Monte Carlo standard error (or standard deviation).
+
+Suppose we have 100 samples from our posterior distribution $\theta_i^*$, and that the sample variance of these draws is 5.2. A rough estimate of our Monte Carlo standard error would then be $\sqrt{5.2/100} \approx 0.228$. So our estimate, $\theta^*$, is probably within about $0.456$ (two standard errors) of the true $E(\theta)$.
+
+**Problem 4:** What does the standard error of our Monte Carlo estimate become if we increase our sample size to 5000? Assume that the variance of the sample draws is still 5.2.
+
+```{r}
+sqrt(5.2/5000)
+```
+

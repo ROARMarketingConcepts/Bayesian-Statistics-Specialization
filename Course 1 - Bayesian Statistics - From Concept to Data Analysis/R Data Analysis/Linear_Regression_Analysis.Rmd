@@ -1,0 +1,48 @@
+---
+title: "Linear Regression Analysis"
+author: "Ken Wood"
+date: "2023-07-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Read in the data
+
+
+```{r}
+golf=read.table('http://www.stat.ufl.edu/~winner/data/pgalpga2008.dat')
+colnames(golf) <- c('drive_distance', 'accuracy', 'gender')
+golf_female <- subset(golf,gender==1)
+golf_male <- subset(golf,gender==2)
+```
+
+#### Plots
+
+```{r plots, echo=FALSE}
+plot(accuracy~drive_distance,data=golf_female)
+plot(accuracy~drive_distance,data=golf_male)
+```
+We fit a linear regression model to the female golfer data.
+
+```{r}
+golf_female_lm = lm(accuracy~drive_distance,data=golf_female)
+summary(golf_female_lm)
+```
+
+Based on the linear regression, determine the `accuracy` based on a `drive_distance` of 260 yards.
+
+Therefore, accuracy=coef(golf_female_lm)[1] + coef(golf_female_lm)[2]*260 
+
+```{r}
+coef(golf_female_lm)[1] + coef(golf_female_lm)[2]*260 
+```
+
+Determine the 95% posterior predictive interval for the `accuracy` of new female golfer whose average driving distance is 260 yards.
+
+```{r}
+predict(golf_female_lm,data.frame(drive_distance=260),interval="predict")
+```
+

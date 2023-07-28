@@ -1,0 +1,142 @@
+---
+title: "Bernoulli-Binomial Distribution Analysis"
+author: "Ken Wood"
+date: "2023-07-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Suppose we are giving two students a multiple-choice exam with 40 questions, where each question has four choices. We don't know how much the students have studied for this exam, but we think that they will do better than just guessing randomly. 
+**1. What are the parameters of interest?**
+
+* Parameters of interest are $\theta_1$=true probability the first student will answer a question correctly, and $\theta_2$=true probability the second student will answer a question correctly.
+
+**2. What is our likelihood?**
+
+* Likelihood is $Binomial(n=40, \theta)$, if we assume that each question is independent and that the probability a student gets each question right is the same for all questions for that student.
+
+**3. What prior should we use?**
+
+* For this prior for $\theta$, we can ask what's the prior probability that $\theta > 0.25$ which would be guessing randomly? Then, look at $\theta > 0.5$ and $\theta > 0.8$.
+
+* The conjugate prior is a beta prior. We can plot the density with `dbeta`.
+
+```{r priors}
+theta=seq(from=0,to=1,by=.01)
+plot(theta,dbeta(theta,1,1),type="l")  # uniform distribution, no improvement to guessing randomly
+plot(theta,dbeta(theta,4,2),type="l")  # getting better, but still has a non-zero distribution at theta=0.5
+plot(theta,dbeta(theta,8,4),type="l")  # the best scenario, dbeta = 0 for theta = 0.25.
+```
+
+
+**4. What is the prior probability $P(\theta >.25)$? $P(\theta>.5)$? $P(\theta>.8)$?**
+
+* Find probabilities using the `pbeta` function.
+
+```{r pbeta}
+1-pbeta(.25,8,4)
+1-pbeta(.5,8,4)
+1-pbeta(.8,8,4)
+```
+
+**5. Suppose the first student gets 33 questions right. What is the posterior
+    distribution for $\theta_1$? $P(\theta_1>.25)$? $P(\theta_1>.5)$? $P(\theta_1>.8)$? What is a 95% posterior credible interval for $\theta_1$?**
+    
+* Posterior is $Beta(\alpha, \beta) = Beta(8+33,4+40-33) = Beta(41,11)$
+```{r}
+41/(41+11)  # posterior mean
+33/40       # MLE
+
+plot(theta,dbeta(theta,8,4),type="l")  # the best scenario, dbeta = 0 for theta = 0.25.
+lines(theta,dbeta(theta,41,11))
+```
+
+
+Plot posterior first to get the right scale on the y-axis
+
+```{r}
+plot(theta,dbeta(theta,41,11),type="l")
+lines(theta,dbeta(theta,8,4),lty=2)
+# plot likelihood
+lines(theta,dbinom(33,size=40,p=theta),lty=3)
+# plot scaled likelihood
+lines(theta,44*dbinom(33,size=40,p=theta),lty=3)
+```
+
+Posterior probabilities
+```{r}
+1-pbeta(.25,41,11)
+1-pbeta(.5,41,11)
+1-pbeta(.8,41,11)
+```
+
+Equal-tailed 95% credible interval
+```{r}
+qbeta(.025,41,11)
+qbeta(.975,41,11)
+```
+
+**6. Suppose the second student gets 24 questions right. What is the posterior
+    distribution for $\theta_2$? $P(\theta_2>.25)$? $P(\theta_2>.5)$? $P(\theta_2>.8)$? What is a 95% posterior credible interval for $\theta_2$?**
+    
+* Posterior is $Beta(\alpha, \beta) = Beta(8+24,4+40-24) = Beta(32,20)$
+```{r}
+32/(32+20)  # posterior mean
+24/40       # MLE
+
+plot(theta,dbeta(theta,8,4),type="l")  # the best scenario, dbeta = 0 for theta = 0.25.
+lines(theta,dbeta(theta,32,20))
+```
+    
+Plot posterior first to get the right scale on the y-axis
+
+```{r}
+plot(theta,dbeta(theta,32,20),type="l")
+lines(theta,dbeta(theta,8,4),lty=2)
+# plot likelihood
+lines(theta,dbinom(24,size=40,p=theta),lty=3)
+# plot scaled likelihood
+lines(theta,44*dbinom(24,size=40,p=theta),lty=3)
+```
+
+Posterior probabilities
+```{r}
+1-pbeta(.25,32,20)
+1-pbeta(.5,32,20)
+1-pbeta(.8,32,20)
+```
+
+Equal-tailed 95% credible interval
+```{r}
+qbeta(.025,32,20)
+qbeta(.975,32,20)
+```
+
+**7. What is the posterior probability that $\theta_1>\theta_2$, i.e., that the 
+    first student has a better chance of getting a question right than
+    the second student?**
+    
+* We can estimate this by simulation: draw 1000 samples from each and see how often we observe $\theta_1>\theta_2$
+
+```{r}
+theta1=rbeta(1000,41,11)
+theta1
+```
+
+```{r}
+theta2=rbeta(1000,32,20)
+theta2
+```
+
+
+```{r}
+mean(theta1>theta2)
+```
+
+**8. Note - for other distributions:**
+
+* dgamma,pgamma,qgamma,rgamma
+* dnorm,pnorm,qnorm,rnorm

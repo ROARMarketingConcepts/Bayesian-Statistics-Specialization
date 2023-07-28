@@ -1,0 +1,11 @@
+name: Publish Document
+title:
+username:
+account: rpubs
+server: rpubs.com
+hostUrl: rpubs.com
+appId: https://api.rpubs.com/api/v1/document/1061903/9bbb6fc0f0f64c7b86743a13eb9519f2
+bundleId: https://api.rpubs.com/api/v1/document/1061903/9bbb6fc0f0f64c7b86743a13eb9519f2
+url: http://rpubs.com/ROARMarketingConcepts/1061903
+when: 1689109559.87597
+lastSyncTime: 1689109559.87598

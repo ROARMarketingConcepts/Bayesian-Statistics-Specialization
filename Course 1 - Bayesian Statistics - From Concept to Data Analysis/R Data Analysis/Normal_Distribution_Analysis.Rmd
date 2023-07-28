@@ -1,0 +1,107 @@
+---
+title: "Normal Distribution Analysis"
+author: "Ken Wood"
+date: "2023-07-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### A normal distribution or Gaussian distribution is a type of continuous probability distribution for a real-valued random variable. 
+
+<p style="text-align: center;">$X_i \stackrel{iid}{\sim} N(\mu,\sigma_0^2)$ </p>
+
+<p style="text-align: center;">prior: $\mu \sim N(m_{\space0},s_0^2)$</p>
+
+```{r}
+temps = c(94.6,95.4,96.2,94.9,95.9)
+mean(temps)
+qnorm(.975,96.17,sqrt(.042))
+pnorm(100,96.17,sqrt(.042))
+```
+
+#### Restaurant Problem
+
+At Restaurant B, our friend investigates the three observations above 700 grams and discovers that she had ordered the incorrect meal on those dates.  She removes these observations from the data set and proceeds with the Restaurant B analysis using $n=27$.  She assumes a normal likelihood for the data with unknown mean $\mu_b$ and unknown variance $\sigma_B^2$, the prior on $\mu_B$ is normal with mean $m_{\space B}$ and variance $\sigma_B^2/w$. Next, the marginal prior for $\sigma_B^2$ is $Inverse-Gamma(a,b)$.
+
+Our friend's prior guess on the mean dish weight is 500 grams, so we set $m=500$. She is not very confident with this guess, so we set the prior effective sample size, $w=0.1$. Finally, she sets $a=3$ and $b=200$.
+
+We can learn more about this inverse gamma prior by simulating draws from it. If a random variable $X$ follows a $Gamma(a,b)$ distribution, then $\frac{1}{X}$ follows an $Inverse-Gamma(a,b)$ distribution. Hence, we can simulate draws from a gamma distribution and take their reciprocals, which will be draws from an inverse-gamma.
+
+To simulate 1000 draws from a gamma distribution: 
+
+```{r}
+z_b = rgamma(n=1000,shape=3,rate=200)
+x_b = 1/z_b
+mean(x_b)
+```
+
+With $n=27$, our friend calculates the sample mean $\bar{y_B} =609.7$ and sample variance $s_B^2=\frac{1}{n-1}\Sigma(y_i-\bar{y_B})^2=401.8$.  She calculates the posterior distributions:
+
+<p style="text-align: center;">$\sigma^2|\space \mathbf{y}\sim Gamma(a^{\space \prime},b^{\space \prime})\space$ and $\space \mu|\space \sigma^2, \mathbf{y} \sim N(m^{\space \prime}, \frac{\sigma^2}{w+n})$</p>
+
+
+where $a^{\space \prime}= a+\frac{n}{2} = 3+\frac{27}{2} = 16.5$,
+
+$b^{\space \prime}=b+\frac{n-1}{2}s^2+\frac{wn}{2(w+n)}(\bar{y}-m)^2=[200+\frac{27-1}{2}401.8+\frac{(0.1)(27)}{2(0.1+27)}(609.7-500)^2]=6022.9$
+
+$m^{\space \prime}=\frac{n\bar{y}+wm}{w+n}=\frac{(27)(609.7)+(0.1)(500)}{0.1+27}=609.3$
+
+$w=0.1$ and $n=27$
+
+```{r}
+z_B <- rgamma(1000, shape=16.5, rate=6022.9)
+sigma_B2 <- 1/z_B
+#sigma2
+```
+
+```{r}
+mu_B <- rnorm(1000, mean=609.3, sd=sqrt(sigma_B2/27.1))
+#mu
+```
+
+We can use these simulated draws to help us approximate inferences for $\mu$ and $\sigma^2$. For example, we can obtain a 95% equal-tailed credible for $\mu$ by calculating the quantiles/percentiles of the simulated values.
+
+```{r}
+quantile(x=mu_B, probs=c(0.025, 0.975))
+```
+
+We complete our experiment at Restaurant A with $n=30$ data points, which appear to be normally-distributed.  We calculate the sample mean $\bar{y}=622.8$ and sample variance $s^2=\frac{1}{n-1}\Sigma(y_i-\bar{y})^2=403.1$.  
+
+Let's repeat the analysis from the previous question using the same priors and draw samples from the posterior distribution of $\sigma_A^2$ and $\mu_A$ (where $A$ denotes that these parameters are from Restaurant A).  Treating the data from Restaurant A as independent from Restaurant B, we can now attempt to answer our friend's original question: is restaurant A more generous?  To do so, we can compute posterior probabilities of hypotheses like $\mu_A>\mu_B$. This is a simple task if we have simulated draws for $\mu_A$ and $\mu_B$. Then count how many of these return a TRUE value and divide by $N$, the total number of simulations.
+
+Therefore, $a_A^{\space \prime}= a_A+\frac{n}{2} = 3+\frac{30}{2} = 18$,
+
+$b_A^{\space \prime}=b_A+\frac{n-1}{2}s_A^2+\frac{wn_A}{2(w+n_A)}(\bar{y_A}-m_A)^2=[200+\frac{30-1}{2}403.1+\frac{(0.1)(30)}{2(0.1+30)}(622.8-500)^2]=6796.4$
+
+$m_A^{\space \prime}=\frac{n_A\bar{y_A}+wm_A}{w+n_A}=\frac{(30)(622.8)+(0.1)(500)}{0.1+30}=604.3$
+
+$w=0.1$ and $n_A=30$
+
+```{r}
+bAprime=200+((30-1)/2)*403.1+((0.1*30)/(2*(0.1+30)))*(622.8-500)^2
+bAprime
+```
+
+```{r}
+mAprime=(30*622.8+0.1*500)/(01+30)
+mAprime
+```
+
+We now draw samples for $\mu_A$ and $\sigma_A^2$:
+
+```{r}
+z_A <- rgamma(1000, shape=18, rate=6796.4)
+sigma_A2 <- 1/z_A
+```
+
+```{r}
+mu_A <- rnorm(1000, mean=604.3, sd=sqrt(sigma_A2/30.1))
+```
+
+```{r}
+mean(mu_A>mu_B)
+```
+
