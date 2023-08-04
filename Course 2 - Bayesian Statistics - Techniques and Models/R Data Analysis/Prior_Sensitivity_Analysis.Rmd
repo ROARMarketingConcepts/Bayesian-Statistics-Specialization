@@ -111,3 +111,5 @@ mean(mod2_csim[,"b_intx"] > 0) # posterior probability that b_intx is positive
 
 The result here is interesting. Our estimate for the interaction coefficient has gone from negative under the noninformative prior to positive under the skeptical prior, so the result is sensitive. In this case, because the skeptical prior shrinks away much of the bad health main effect, it is likely that this interaction effect attempts to restore some of the positive effect of bad health on visits. Thus, despite some observed prior sensitivity, our conclusion that bad health positively associates with more visits remains unchanged.
 
+
+

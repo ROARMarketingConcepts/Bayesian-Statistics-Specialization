@@ -137,7 +137,7 @@ head(X)
 ```
 
 ```{r}
-(pm_params1 = colMeans(mod1_csim)) # posterior mean
+(pm_params1 = colMeans(mod1_csim)) # posterior means
 ```
 
 ```{r}
@@ -292,3 +292,208 @@ Next, we are given a penalty for the complexity of our model. This penalty is ne
 We add these two quantities to get the DIC (the last number). The better-fitting model has a lower DIC value. In this case, the gains we receive in deviance by adding the `is_oil` covariate outweigh the penalty for adding an extra parameter. The final DIC for the second model is lower than for the first, so we would prefer using the second model.
 
 We encourage you to explore different model specifications and compare their fit to the data using DIC. [Wikipedia](https://en.wikipedia.org/wiki/Deviance_information_criterion) provides a good introduction to DIC and we can find more details about the `JAGS` implementation through the `rjags` package documentation by entering `?dic.samples` in the `R` console.
+
+### Quizes
+
+```{r}
+library("car")  # load the 'car' package
+data("Anscombe")  # load the data set
+?Anscombe  # read a description of the data
+head(Anscombe)  # look at the first few lines of the data
+pairs(Anscombe)  # scatter plots for each pair of variables
+```
+
+```{r}
+education_model <- lm(education~income+young+urban,data=Anscombe)
+summary(education_model)
+```
+
+```{r}
+library("rjags")
+
+mod_string = " model {
+    for (i in 1:length(education)) {
+        education[i] ~ dnorm(mu[i], prec)
+        mu[i] = b0 + b[1]*income[i] + b[2]*young[i] + b[3]*urban[i]
+    }
+    
+    b0 ~ dnorm(0.0, 1.0/1.0e6)
+    for (i in 1:3) {
+        b[i] ~ dnorm(0.0, 1.0/1.0e6)
+    }
+    
+    prec ~ dgamma(1.0/2.0, 1.0*1500.0/2.0)
+    	## Initial guess of variance based on overall
+    	## variance of education variable. Uses low prior
+    	## effective sample size. Technically, this is not
+    	## a true 'prior', but it is not very informative.
+    sig2 = 1.0 / prec
+    sig = sqrt(sig2)
+} "
+
+data_jags = as.list(Anscombe)
+
+```
+
+
+```{r}
+params1 = c("b0","b", "sig")
+
+inits1 = function() {
+    inits = list("b"=rnorm(3,0.0,100.0), "prec"=rgamma(1,1.0,1.0))
+}
+```
+
+```{r}
+mod1 = jags.model(textConnection(mod_string), data=data_jags, inits=inits1, n.chains=3)
+
+update(mod1, 1000) # burn-in
+
+mod1_sim = coda.samples(model=mod1,
+                        variable.names=params1,
+                        n.iter=5000)
+
+mod1_csim = do.call(rbind, mod1_sim) # combine multiple chains
+```
+
+```{r}
+plot(mod1_sim)
+gelman.diag(mod1_sim)
+autocorr.diag(mod1_sim)
+autocorr.plot(mod1_sim)
+effectiveSize(mod1_sim)
+```
+
+```{r}
+plot(education_model)
+```
+
+```{r}
+dic.samples(mod1, n.iter=1e5)
+```
+
+```{r}
+library("rjags")
+
+mod_string_question_4a = " model {
+    for (i in 1:length(education)) {
+        education[i] ~ dnorm(mu[i], prec)
+        mu[i] = b0 + b[1]*income[i] + b[2]*young[i]
+    }
+    
+    b0 ~ dnorm(0.0, 1.0/1.0e6)
+    for (i in 1:2) {
+        b[i] ~ dnorm(0.0, 1.0/1.0e6)
+    }
+    
+    prec ~ dgamma(1.0/2.0, 1.0*1500.0/2.0)
+    	## Initial guess of variance based on overall
+    	## variance of education variable. Uses low prior
+    	## effective sample size. Technically, this is not
+    	## a true 'prior', but it is not very informative.
+    sig2 = 1.0 / prec
+    sig = sqrt(sig2)
+} "
+
+data_jags = as.list(Anscombe)
+
+```
+
+
+```{r}
+params1 = c("b0","b", "sig")
+
+inits1 = function() {
+    inits = list("b"=rnorm(2,0.0,100.0), "prec"=rgamma(1,1.0,1.0))
+}
+```
+
+
+```{r}
+mod_question_4a = jags.model(textConnection(mod_string_question_4a), data=data_jags, inits=inits1, n.chains=3)
+
+update(mod_question_4a, 1000) # burn-in
+
+mod_question_4a_sim = coda.samples(model=mod_question_4a,
+                        variable.names=params1,
+                        n.iter=5000)
+
+mod_question_4a_csim = do.call(rbind, mod_question_4a_sim) # combine multiple chains
+```
+
+
+```{r}
+plot(mod_question_4a_sim)
+gelman.diag(mod_question_4a_sim)
+autocorr.diag(mod_question_4a_sim)
+autocorr.plot(mod_question_4a_sim)
+effectiveSize(mod_question_4a_sim)
+```
+
+```{r}
+dic.samples(mod_question_4a, n.iter=1e5)
+```
+
+
+```{r}
+library("rjags")
+
+mod_string_question_4b = " model {
+    for (i in 1:length(education)) {
+        education[i] ~ dnorm(mu[i], prec)
+        mu[i] = b0 + b[1]*income[i] + b[2]*young[i]+ b[3]*young[i]*income[i]
+    }
+    
+    b0 ~ dnorm(0.0, 1.0/1.0e6)
+    for (i in 1:3) {
+        b[i] ~ dnorm(0.0, 1.0/1.0e6)
+    }
+    
+    prec ~ dgamma(1.0/2.0, 1.0*1500.0/2.0)
+    	## Initial guess of variance based on overall
+    	## variance of education variable. Uses low prior
+    	## effective sample size. Technically, this is not
+    	## a true 'prior', but it is not very informative.
+    sig2 = 1.0 / prec
+    sig = sqrt(sig2)
+} "
+
+data_jags = as.list(Anscombe)
+
+```
+
+
+```{r}
+params1 = c("b0","b", "sig")
+
+inits1 = function() {
+    inits = list("b"=rnorm(3,0.0,100.0), "prec"=rgamma(1,1.0,1.0))
+}
+```
+
+
+```{r}
+mod_question_4b = jags.model(textConnection(mod_string_question_4b), data=data_jags, inits=inits1, n.chains=3)
+
+update(mod_question_4b, 1000) # burn-in
+
+mod_question_4b_sim = coda.samples(model=mod_question_4b,
+                        variable.names=params1,
+                        n.iter=5000)
+
+mod_question_4b_csim = do.call(rbind, mod_question_4b_sim) # combine multiple chains
+```
+
+
+```{r}
+plot(mod_question_4b_sim)
+gelman.diag(mod_question_4b_sim)
+autocorr.diag(mod_question_4b_sim)
+autocorr.plot(mod_question_4b_sim)
+effectiveSize(mod_question_4b_sim)
+```
+
+```{r}
+dic.samples(mod_question_4b, n.iter=1e5)
+```
+

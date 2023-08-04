@@ -1,0 +1,464 @@
+---
+title: "Hierarchical Modeling"
+author: "Ken Wood"
+date: "2023-07-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Data Input
+
+Let’s fit our hierarhical model for counts of chocolate chips. The data can be found in `cookies.dat`.
+
+```{r}
+dat = read.table(file="data_files/cookies.dat", header=TRUE)
+head(dat)
+table(dat$location)
+hist(dat$chips)
+boxplot(chips~location, data=dat)
+```
+
+### Prior predictive checks
+
+Before implementing the model, we need to select prior distributions for $\alpha$ and $\beta$, the hyperparameters governing the gamma distribution for the $\lambda$ parameters. First, think about what the $\lambda$’s represent. For location $j$, $\lambda j$ is the expected number of chocolate chips per cookie. Hence, $\alpha$ and $\beta$ control the distribution of these means between locations. The mean of this gamma distributidon will represent the overall mean of number of chips for all cookies. The variance of this gamma distribution controls the variability between locations. If this is high, the mean number of chips will vary widely from location to location. If it is small, the mean number of chips will be nearly the same from location to location.
+
+To see the effects of different priors on the distribution of $\lambda$’s, we can simulate. Suppose we try independent exponential priors for $\alpha$ and $\beta$.
+
+```{r}
+set.seed(112)
+n_sim = 500
+alpha_pri = rexp(n_sim, rate=1.0/2.0)
+beta_pri = rexp(n_sim, rate=5.0)
+```
+
+
+```{r}
+mu_pri = alpha_pri/beta_pri
+sig_pri = sqrt(alpha_pri/beta_pri^2)
+
+summary(mu_pri)
+summary(sig_pri)
+```
+
+After simulating from the priors for $\alpha$ and $\beta$, we can use those samples to simulate further down the hierarchy:
+
+```{r}
+lambda_pri = rgamma(n=n_sim, shape=alpha_pri, rate=beta_pri)
+summary(lambda_pri)
+```
+
+Or for a prior predictive reconstruction of the original data set:
+
+```{r}
+(lambda_pri = rgamma(n=5, shape=alpha_pri[1:5], rate=beta_pri[1:5]))
+(y_pri = rpois(n=150, lambda=rep(lambda_pri, each=30)))
+```
+
+Because these priors have high variance and are somewhat noninformative, they produce unrealistic predictive distributions. Still, enough data would overwhelm the prior, resulting in useful posterior distributions. Alternatively, we could tweak and simulate from these prior distributions until they adequately represent our prior beliefs. Yet another approach would be to re-parameterize the gamma prior, which we’ll demonstrate as we fit the model.
+
+### `JAGS` Model
+
+```{r}
+library("rjags")
+
+mod_string = " model {
+for (i in 1:length(chips)) {
+  chips[i] ~ dpois(lambda[location[i]])
+}
+
+for (j in 1:max(location)) {
+  lambda[j] ~ dgamma(alpha, beta)
+}
+
+alpha = mu^2 / sig^2
+beta = mu / sig^2
+
+mu ~ dgamma(2.0, 1.0/5.0)
+sig ~ dexp(1.0)
+
+} "
+
+set.seed(113)
+
+data_jags = as.list(dat)
+
+params = c("lambda", "mu", "sig")
+
+mod = jags.model(textConnection(mod_string), data=data_jags, n.chains=3)
+update(mod, 1e3)
+
+mod_sim = coda.samples(model=mod,
+                       variable.names=params,
+                       n.iter=5e3)
+mod_csim = as.mcmc(do.call(rbind, mod_sim))
+
+## convergence diagnostics
+plot(mod_sim)
+
+gelman.diag(mod_sim)
+autocorr.diag(mod_sim)
+autocorr.plot(mod_sim)
+effectiveSize(mod_sim)
+
+## compute DIC
+dic = dic.samples(mod, n.iter=1e3)
+```
+
+### Model checking
+
+After assessing convergence, we can check the fit via residuals. With a hierarhcical model, there are now two levels of residuals: the observation level and the location mean level. To simplify, we’ll look at the residuals associated with the posterior means of the parameters.
+
+First, we have observation residuals, based on the estimates of location means.
+
+```{r}
+## observation level residuals
+(pm_params = colMeans(mod_csim))
+
+yhat = rep(pm_params[1:5], each=30)
+resid = dat$chips - yhat
+plot(resid)
+plot(jitter(yhat), resid)
+var(resid[yhat<7])
+var(resid[yhat>11])
+```
+
+Also, we can look at how the location means differ from the overall mean $\mu$.
+
+```{r}
+## location level residuals
+lambda_resid = pm_params[1:5] - pm_params["mu"]
+plot(lambda_resid)
+abline(h=0, lty=2)
+```
+
+We don’t see any obvious violations of our model assumptions.
+
+### Results
+
+```{r}
+summary(mod_sim)
+```
+
+### Posterior predictive simulation
+
+Just as we did with the prior distribution, we can use these posterior samples to get Monte Carlo estimates that interest us from the posterior predictive distribution.
+
+For example, we can use draws from the posterior distribution of $\mu$ and $\sigma$ to simulate the posterior predictive distribution of the mean for a new location.
+
+```{r}
+(n_sim = nrow(mod_csim))
+
+lambda_pred = rgamma(n=n_sim, shape=mod_csim[,"mu"]^2/mod_csim[,"sig"]^2, 
+                  rate=mod_csim[,"mu"]/mod_csim[,"sig"]^2)
+hist(lambda_pred)
+mean(lambda_pred > 15)
+```
+
+Using these $\lambda$ draws, we can go to the observation level and simulate the number of chips per cookie, which takes into account the uncertainty in $\lambda$:
+
+```{r}
+y_pred = rpois(n=n_sim, lambda=lambda_pred)
+hist(y_pred)
+mean(y_pred > 15)
+hist(dat$chips)
+```
+
+Finally, we could answer questions like: what is the posterior probability that the next cookie produced in Location 1 will have fewer than seven chips?
+
+```{r}
+y_pred1 = rpois(n=n_sim, lambda=mod_csim[,"lambda[1]"])
+hist(y_pred1)
+mean(y_pred1<7)
+```
+
+### Random intercept linear model
+
+We can extend the linear model for the Leinhardt data on infant mortality by incorporating the region variable. We’ll do this with a hierarhcical model, where each region has its own intercept.
+
+```{r}
+library("car")
+data("Leinhardt")
+?Leinhardt
+str(Leinhardt)
+pairs(Leinhardt)
+head(Leinhardt)
+```
+
+Previously, we worked with infant mortality and income on the logarithmic scale. Recall also that we had to remove some missing data.
+
+```{r}
+dat = na.omit(Leinhardt)
+dat$logincome = log(dat$income)
+dat$loginfant = log(dat$infant)
+str(dat)
+```
+
+Now we can fit the proposed model:
+
+```{r}
+library("rjags")
+
+mod_string = " model {
+  for (i in 1:length(y)) {
+    y[i] ~ dnorm(mu[i], prec)
+    mu[i] = a[region[i]] + b[1]*log_income[i] + b[2]*is_oil[i]
+  }
+  
+  for (j in 1:max(region)) {
+    a[j] ~ dnorm(a0, prec_a)
+  }
+  
+  a0 ~ dnorm(0.0, 1.0/1.0e6)
+  prec_a ~ dgamma(1/2.0, 1*10.0/2.0)
+  tau = sqrt( 1.0 / prec_a )
+  
+  for (j in 1:2) {
+    b[j] ~ dnorm(0.0, 1.0/1.0e6)
+  }
+  
+  prec ~ dgamma(5/2.0, 5*10.0/2.0)
+  sig = sqrt( 1.0 / prec )
+} "
+
+set.seed(116)
+data_jags = list(y=dat$loginfant, log_income=dat$logincome,
+                  is_oil=as.numeric(dat$oil=="yes"), region=as.numeric(dat$region))
+data_jags$is_oil
+table(data_jags$is_oil, data_jags$region)
+
+params = c("a0", "a", "b", "sig", "tau")
+
+mod = jags.model(textConnection(mod_string), data=data_jags, n.chains=3)
+update(mod, 1e3) # burn-in
+
+mod_sim = coda.samples(model=mod,
+                       variable.names=params,
+                       n.iter=5e3)
+
+mod_csim = as.mcmc(do.call(rbind, mod_sim)) # combine multiple chains
+
+## convergence diagnostics
+plot(mod_sim)
+
+gelman.diag(mod_sim)
+autocorr.diag(mod_sim)
+autocorr.plot(mod_sim)
+effectiveSize(mod_sim)
+```
+
+### Results
+
+Convergence looks okay, so let’s compare this with the old model from Lesson 7 using DIC:
+
+```{r}
+dic.samples(mod, n.iter=1e3)
+```
+
+It appears that this model is an improvement over the non-hierarchical one we fit earlier. Notice that the penalty term, which can be interpreted as the “effective” number of parameters, is less than the actual number of parameters (nine). There are fewer “effective” parameters because they are “sharing” information or “borrowing strength” from each other in the hierarhical structure. If we had skipped the hierarchy and fit one intercept, there would have been four parameters. If we had fit separate, independent intercepts for each region, there would have been seven parameters (which is close to what we ended up with).
+
+Finally, let’s look at the posterior summary.
+
+```{r}
+summary(mod_sim)
+```
+
+In this particular model, the intercepts do not have a real interpretation because they correspond to the mean response for a country that does not produce oil and has $0 log-income per capita (which is $1 income per capita). We can interpret $a_0$ as the overall mean intercept and $\tau$ as the standard deviation of intercepts across regions.
+
+### Other models
+
+We have not investigated adding interaction terms, which might be appropriate. We only considered adding hierarchy on the intercepts, but in reality nothing prevents us from doing the same for other terms in the model, such as the coefficients for income and oil. We could try any or all of these alternatives and see how the DIC changes for those models. This, together with other model checking techniques we have discussed could be used to identify your best model that you can use to make inferences and predictions.
+
+### Quiz Questions
+
+In previous lessons, we fit models to data representing percent growth in personnel for companies in two industries. Below are additional data from the two original industries (with 10 and 6 companies, respectively), as well as 3 additional industries. Percent growth is reported for a total of 53 companies.
+
+```{r}
+dat = read.table(file="data_files/pctgrowth.csv", sep=",", header=TRUE)
+head(dat)
+table(dat$grp)
+hist(dat$y)
+boxplot(y~grp, data=dat)
+```
+
+Rather that fit 5 separate models, one for each industry, we can fit a hierarchical model. As before, we assume a normal likelihood and common variance across all observations. Each industry will have its own mean growth, and each of these means will come from a common distribution, from which we will estimate the overall mean and variability across industries.
+
+Let $i$ index the individual companies, and $g_i$ indicate the industry (`grp` variable in `pctgrowth`) for company $i$. How do we describe the hierarchical model?
+
+<p style="text-align: center;">$y_i \space |\space \theta_{g_i}, \sigma^2 \space \stackrel{ind}{\sim} \space N(\theta_{g_i},\sigma^2), \space \space i=1,...,53,\space \space g_i \in \{1,...,5\}$ </p>
+
+<p style="text-align: center;">$\theta_g \space |\space \mu, \tau^2 \space \stackrel{iid}{\sim} \space N(\mu,\tau^2), \space \space g_i \in \{1,...,5\}$ </p>
+
+<p style="text-align: center;">$\mu \space {\sim} \space N(0,1e6)$</p>
+
+<p style="text-align: center;">$\tau^2 \space {\sim} \space IG(\frac{1}{2},(1)\frac{3}{2}))$</p>
+
+<p style="text-align: center;">$\sigma^2 \space {\sim} \space IG(\frac{2}{2},(2)\frac{1}{2}))$</p>
+
+Fit the hierarchical model in `JAGS` and obtain posterior mean estimates for each industry's mean growth (posterior mean for each $\theta_g$)
+
+```{r}
+mod_quiz_string = " model {
+  for (i in 1:length(y)) {
+    y[i] ~ dnorm(theta[grp[i]], prec)
+  }
+  
+  for (j in 1:max(grp)) {
+    theta[j] ~ dnorm(mu, tau_sq)
+  }
+  
+  mu ~ dnorm(0, 1/1e6)
+  tau_sq ~ dgamma(1.0/2.0, 1.0*3.0/2.0)
+  prec ~ dgamma(2.0/2.0, 2*1/2)
+  sig = sqrt(1/prec)
+
+} "
+
+set.seed(113)
+
+data_jags = as.list(dat)
+
+params = c("theta", "mu", "sig")
+
+mod_quiz = jags.model(textConnection(mod_quiz_string), data=data_jags, n.chains=3)
+update(mod_quiz, 1e3)
+
+mod_quiz_sim = coda.samples(model=mod_quiz,
+                       variable.names=params,
+                       n.iter=5e3)
+mod_quiz_csim = as.mcmc(do.call(rbind, mod_quiz_sim))
+
+## convergence diagnostics
+plot(mod_quiz_sim)
+
+gelman.diag(mod_quiz_sim)
+autocorr.diag(mod_quiz_sim)
+autocorr.plot(mod_quiz_sim)
+effectiveSize(mod_quiz_sim)
+
+## compute DIC
+dic = dic.samples(mod_quiz, n.iter=1e3)
+
+pm_params = apply(mod_quiz_csim, 2, mean)
+means_theta = pm_params[-c(1,2)]
+```
+
+We are interested in comparing these estimates to those obtained from the model that assumes no hierarchy (the ANOVA cell means model). We can approximate the posterior estimates for the 5 industry means under a noninformative prior by simply calculating the sample mean growth for the five industries. We can do this in `R` with: 
+
+```{r}
+means_anova = tapply(dat$y, INDEX=dat$grp, FUN=mean)
+## dat is the data read from pctgrowth.csv
+
+plot(means_anova)
+points(means_theta, col="red") ## where means_theta are the posterior point estimates for the industry means.
+```
+
+The estimates from the hierarchical model have **less** variability than those of the ANOVA model, tending toward **smaller** magnitudes.
+
+In our hierarchical model for personnel growth, we assumed that the variability between companies within an industry was constant across industries ($\sigma^2$ was the same for all industries.)  Which approach would be less informative?
+
+**Answer:** Calculate the posterior probability that $\sigma^2/\tau^2>1$ in the original model. If this probability exceeds a pre-determined amount, use a model with separate variance parameters.
+
+Consider once again the OME data in the `MASS` package in `R`, which we explored earlier. The data consist of experimental results from tests of auditory perception in children. Under varying conditions and for multiple trials under each condition, children either correctly or incorrectly identified the source of the changing signals.
+
+Recall that the model looked like this:
+
+<p style="text-align: center;">$y_i \space | \space \phi_i \stackrel{ind}{\sim} Binomial(n_i,\phi_i), \space \space i=1,...,712$</p>
+
+<p style="text-align: center;">$logit(\phi_i)=\beta_0+\beta_1 Age_i+\beta_2 I_{(OME_i=low)}+\beta_3 Loud_i+\beta_4 I_{(Noise_i=incoherent)}$</p>
+
+<p style="text-align: center;">$\beta_0 \sim N(0,5^2)$</p>
+
+<p style="text-align: center;">$\beta_k \stackrel{iid}{\sim} N(0,4^2)\space \space k=1,2,3.$</p>
+
+As with other models, we will extend the intercept (and rename it) so that the linear part of the model looks like this:
+
+<p style="text-align: center;">$logit(\phi_i)=\alpha_{(ID_i)}+\beta_1 Age_i+\beta_2 I_{(OME_i=low)}+\beta_3 Loud_i+\beta_4 I_{(Noise_i=incoherent)}$</p>
+
+where $ID_i$ is an index identifying the child for observation $i$. 
+
+The hierarchical prior for the intercepts would look like this:
+
+<p style="text-align: center;">$\alpha_j \stackrel{iid}{\sim} N(\mu,\tau^2),\space \space j=1,...,63$ (There are 63 children).</p>
+
+followed by the priors for $\mu$ and $\tau^2$,
+
+<p style="text-align: center;">$\mu \sim N(0,10^2)$</p>
+
+<p style="text-align: center;">$\tau^2 \sim IG(\frac{1}{2},\frac{1}{2})$</p>
+
+$\tau^2$ indicates the variability in the number of correct responses across tests for one child.
+
+We fit the hierarchical model outlined above using `JAGS`:
+
+```{r}
+library("MASS")
+data("OME")
+
+dat = subset(OME, OME != "N/A")
+dat$OME = factor(dat$OME) # relabel OME
+dat$ID = as.numeric(factor(dat$ID)) # relabel ID so there are no gaps in numbers (they now go from 1 to 63)
+
+## Original reference model and covariate matrix
+mod_glm = glm(Correct/Trials ~ Age + OME + Loud + Noise, data=dat, weights=Trials, family="binomial")
+X = model.matrix(mod_glm)[,-1]
+
+## Original model (that needs to be extended)
+mod2_quiz_string = " model {
+	for (i in 1:length(y)) {
+		y[i] ~ dbin(phi[i], n[i])
+		logit(phi[i]) = alpha[ID[i]] + b[1]*Age[i] + b[2]*OMElow[i] + b[3]*Loud[i] + b[4]*Noiseincoherent[i]
+	}
+	 
+	for (k in 1:max(ID)) {
+	  alpha[k] ~ dnorm(mu, prec_alpha)
+	}
+	
+	for (j in 1:4) {
+		b[j] ~ dnorm(0.0, 1.0/4.0^2)
+	}
+	
+	mu ~ dnorm(0.0, 1.0/10.0^2)
+	prec_alpha ~ dgamma(1.0/2.0, 1.0/2.0)
+	tau = 1/prec_alpha
+	
+	
+} "
+
+data_jags = as.list(as.data.frame(X))
+data_jags$y = dat$Correct
+data_jags$n = dat$Trials
+data_jags$ID = dat$ID
+```
+
+How do the convergence diagnostics look?
+
+```{r}
+params = c("alpha", "b", "mu", "tau")
+
+mod2_quiz = jags.model(textConnection(mod2_quiz_string), data=data_jags, n.chains=3)
+update(mod2_quiz, 1e3)
+
+mod2_quiz_sim = coda.samples(model=mod2_quiz,
+                       variable.names=params,
+                       n.iter=5e3)
+mod2_quiz_csim = as.mcmc(do.call(rbind, mod2_quiz_sim))
+
+## convergence diagnostics
+plot(mod2_quiz_sim)
+
+gelman.diag(mod2_quiz_sim)
+autocorr.diag(mod2_quiz_sim)
+autocorr.plot(mod2_quiz_sim)
+effectiveSize(mod2_quiz_sim)
+
+## compute DIC
+dic = dic.samples(mod2_quiz, n.iter=1e3)
+dic
+```
+
+
+
+
