@@ -1,0 +1,317 @@
+---
+title: "Data Analysis Project - Bayesian Statistics"
+author: "Ken Wood"
+date: "2023-08-03"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Executive Summary
+
+The purpose of this project was to fit a series of regression models to a dataset containing housing features and a corresponding sale price as the response variable. Two models were constructed using both `R` and `JAGS`. One of the `JAGS` models uses 3 features to predict sale prices while the final iteration uses 4 features.  A number of evaluation metrics (including the deviation information criterion (DIC)) were generated to gauge the accuracy of each model. It was determined that incorporating the 4th feature reduced the DIC and, hence, was a better for the data. 
+
+### Introduction
+
+The Ames Housing dataset, which is available on [Kaggle.com](https://www.kaggle.com/competitions/house-prices-advanced-regression-techniques/overview), was compiled by Dean De Cock for use in data science education. It's an incredible dataset resource for data scientists and statisticians looking for a modernized and expanded version of the often-cited Boston Housing dataset. 
+
+The subject dataset contains 79 explanatory variables describing (almost) every aspect of residential homes in Ames, Iowa, along with the sale price of each home. **For the purposes of this project, we will construct two models that leverage a subset (specifically, 3-4) of the most informative explanatory variables to predict sale prices for homes given their features.**
+
+The features to be examined are:
+
+* `LotArea` - Lot size in square feet
+* `OverallCond` - Rates the overall condition of the house (10=Excellent, 1=Very Poor)
+* `GrLivArea` - Above grade (ground) living area in square feet
+
+We will create an additional iteration of the model that incorporates the feature `TotRmsAbvGrd`, the total number of rooms above grade.
+
+
+### Load and Explore the Dataset
+
+```{r read in dataset}
+dat = read.csv(file="data_files/housing-price-data.csv", header=TRUE)
+
+# Subset the raw data to features of interest and the response variable, SalePrice
+dat1=dat[,c("LotArea","HouseStyle","OverallCond","GrLivArea","SalePrice")]
+head(dat1)
+str(dat1)
+```
+
+We will need to code the categorical variable `HouseStyle`.
+
+```{r}
+dat1$HouseStyle_coded = factor(dat1$HouseStyle)
+newdat1 = dat1[,c("LotArea","HouseStyle_coded","OverallCond","GrLivArea","SalePrice")]
+
+head(newdat1)
+```
+
+Let's examine the distribution of the response variable, `SalePrice`
+```{r histogram of SalePrice}
+hist(newdat1$SalePrice,breaks=50,main="Histogram of SalePrice",xlab = "SalePrice")
+abline(v = mean(newdat1$SalePrice), col='blue', lwd = 3)
+#add label to mean vertical line
+text(x=4e5, y=2e2, 'Mean = $181K, SD= $79K')
+```
+
+It appears that the distribution of `SalePrice` is somewhat normal with a mean and standard deviation calculated as follows:
+
+```{r}
+mean(newdat1$SalePrice)
+sd(newdat1$SalePrice)
+```
+
+Now, let's look at the relationships among the features and their distributions:
+
+```{r}
+library(Hmisc)
+pairs(newdat1)
+```
+
+It looks like most, if not all, of the numeric features have a somewhat linear relationship with `SalePrice`.
+
+```{r}
+hist.data.frame(newdat1)
+```
+
+It also appears that all of our non-categorical variables (including the response variable, `SalePrice`) have a somewhat normal distribution.
+
+### Postulate a Model
+
+Let's start off by postulating a linear model of the descriptor features.
+
+```{r}
+mod_linear = lm(SalePrice~LotArea+HouseStyle_coded+OverallCond+GrLivArea, data=newdat1)
+summary(mod_linear)
+```
+
+We now create a hierarchical model in `JAGS` with the following configuration:
+
+<p style="text-align: center;">$y_i \sim N(\mu_i,\sigma^2),\space \space \space \mu_i = \beta_0+\beta x_{1i}+...+\beta_k x_{ki}, \space \space \space \beta_k \sim N(0, 1e6)$</p> 
+
+We note that $k$ is the number of descriptor variables in the data set and $i$ is the number of observations. 
+
+Also,
+
+<p style="text-align: center;">$y_i\space| \space x_i,\beta,\sigma^2 \stackrel{ind}{\sim}N(\beta_0+\beta x_{1i}+...+\beta_k x_{ki},\sigma^2)$,</p>  
+
+where the noninformative prior for $\sigma^2$ is modeled using an $InverseGamma(\alpha,\beta)$ distribution.
+```{r}
+library("rjags")
+newdat1 = na.omit(newdat1)
+
+mod1_jags_string = " model {
+    for (i in 1:n) {
+        y[i] ~ dnorm(mu[i], prec)
+        mu[i] = b0 
+                + b[1]*LotArea[i] 
+                + b[2]*OverallCond[i]
+                + b[3]*HouseStyle_coded1.5Unf[i]
+                + b[4]*HouseStyle_coded1Story[i]
+                + b[5]*HouseStyle_coded2.5Fin[i]
+                + b[6]*HouseStyle_coded2.5Unf[i]
+                + b[7]*HouseStyle_coded2Story[i]
+                + b[8]*HouseStyle_codedSFoyer[i]
+                + b[9]*HouseStyle_codedSLvl[i]
+    }
+    
+    b0 ~ dnorm(0.0, 1.0/1.0e6)
+    
+    for (i in 1:9) {
+        b[i] ~ dnorm(0.0, 1.0/1.0e6)
+    }
+    
+    prec ~ dgamma(5/2.0, 5*10.0/2.0)
+    sig2 = 1.0 / prec
+    sig = sqrt(sig2)
+} "
+
+set.seed(72)
+data_jags = list(y=newdat1$SalePrice, 
+                 LotArea=newdat1$LotArea,
+                 OverallCond=newdat1$OverallCond,
+                 HouseStyle_coded1.5Unf=as.numeric(newdat1$HouseStyle_coded=="1.5Unf"),
+                 HouseStyle_coded1Story=as.numeric(newdat1$HouseStyle_coded=="1Story"),
+                 HouseStyle_coded2.5Fin=as.numeric(newdat1$HouseStyle_coded=="2.5Fin"),
+                 HouseStyle_coded2.5Unf=as.numeric(newdat1$HouseStyle_coded=="2.5Unf"),
+                 HouseStyle_coded2Story=as.numeric(newdat1$HouseStyle_coded=="2Story"),
+                 HouseStyle_codedSFoyer=as.numeric(newdat1$HouseStyle_coded=="SFoyer"),
+                 HouseStyle_codedSLvl=as.numeric(newdat1$HouseStyle_coded=="SLvl"),
+                 n=nrow(newdat1)) 
+
+params1 = c("b0","b", "sig")
+
+inits1 = function() {
+    inits = list("b0"=rnorm(1,0.0,100.0), "b"=rnorm(9,0.0,100.0), "prec"=rgamma(1,1.0,1.0))
+}
+
+mod1_jags = jags.model(textConnection(mod1_jags_string), data=data_jags, inits=inits1, n.chains=3)
+```
+### Fit the Model using the Monte Carlo-Markov Chain (MCMC) Sampler
+
+```{r}
+update(mod1_jags, 1000) # burn-in
+
+mod1_jags_sim = coda.samples(model=mod1_jags,
+                        variable.names=params1,
+                        n.iter=5000)
+
+mod1_jags_csim = do.call(rbind, mod1_jags_sim) # combine multiple chains
+```
+
+### Check the Model by Examining Convergence Diagnostics
+
+```{r}
+plot(mod1_jags_sim)
+gelman.diag(mod1_jags_sim)
+autocorr.diag(mod1_jags_sim)
+autocorr.plot(mod1_jags_sim)
+effectiveSize(mod1_jags_sim)
+
+dic.samples(mod1_jags, n.iter=1e3)
+```
+
+We can get a posterior summary of the parameters in our model.
+
+```{r}
+summary(mod1_jags_sim)
+```
+
+
+### Residual checks
+
+Checking residuals (the difference between the response and the model’s prediction for that value) is important with linear models since residuals can reveal violations of the assumptions we made to specify the model. In particular, we are looking for any sign that the model is not linear, normally distributed, or that the observations are not independent (conditional on covariates). We first evaluate the simple linear model proposed earlier:
+
+```{r}
+plot(resid(mod_linear)) # to check independence (looks okay)
+plot(predict(mod_linear), resid(mod_linear)) # to check for linearity, constant variance (looks reasonable)
+qqnorm(resid(mod_linear)) # to check Normality assumption (we want this to be a straight line)
+```
+
+Now let’s return to our `JAGS` model. In a Bayesian model, we have distributions for residuals, but we’ll simplify and look only at the residuals evaluated at the posterior mean of the parameters.
+
+
+```{r}
+X = cbind(
+          rep(1.0, data_jags$n), 
+          data_jags$LotArea,
+          data_jags$OverallCond,
+          data_jags$HouseStyle_coded1.5Unf,
+          data_jags$HouseStyle_coded1Story,
+          data_jags$HouseStyle_coded2.5Fin,
+          data_jags$HouseStyle_coded2.5Unf,
+          data_jags$HouseStyle_coded2Story,
+          data_jags$HouseStyle_codedSFoyer,
+          data_jags$HouseStyle_codedSLvl
+          )
+head(X)
+```
+
+```{r}
+(pm_params = colMeans(mod1_jags_csim)) # posterior mean
+```
+
+
+
+```{r}
+yhat = drop(X %*% pm_params[1:10])
+resid = data_jags$y - yhat
+plot(resid) # residuals against data index
+plot(yhat, resid) # residuals against predicted values
+qqnorm(resid) # checking normality of residuals
+plot(predict(mod_linear), resid(mod_linear)) # to compare with reference linear model
+# rownames(dat1)[order(resid1, decreasing=TRUE)[1:5]]
+```
+
+### Iterate with another model
+
+As mentioned previously, we will build another linear model that incorporates the feature `TotRmsAbvGrd`, which is the total rooms above grade (does not include bathrooms).
+
+We first adjust the dataset to include `TotRmsAbvGrd`.
+
+```{r}
+dat2=dat[,c("LotArea","HouseStyle","OverallCond","GrLivArea","TotRmsAbvGrd","SalePrice")]
+dat2$HouseStyle_coded = factor(dat2$HouseStyle)
+newdat2 = dat2[,c("LotArea","HouseStyle_coded","OverallCond","GrLivArea","TotRmsAbvGrd","SalePrice")]
+
+head(newdat2)
+```
+
+```{r}
+
+mod2_jags_string = " model {
+    for (i in 1:n) {
+        y[i] ~ dnorm(mu[i], prec)
+        mu[i] = b0 
+                + b[1]*LotArea[i] 
+                + b[2]*OverallCond[i]
+                + b[3]*HouseStyle_coded1.5Unf[i]
+                + b[4]*HouseStyle_coded1Story[i]
+                + b[5]*HouseStyle_coded2.5Fin[i]
+                + b[6]*HouseStyle_coded2.5Unf[i]
+                + b[7]*HouseStyle_coded2Story[i]
+                + b[8]*HouseStyle_codedSFoyer[i]
+                + b[9]*HouseStyle_codedSLvl[i]
+                + b[10]*TotRmsAbvGrd[i]
+    }
+    
+    b0 ~ dnorm(0.0, 1.0/1.0e6)
+    
+    for (i in 1:10) {
+        b[i] ~ dnorm(0.0, 1.0/1.0e6)
+    }
+    
+    prec ~ dgamma(5/2.0, 5*10.0/2.0)
+    sig2 = 1.0 / prec
+    sig = sqrt(sig2)
+} "
+
+set.seed(72)
+data_jags = list(y=newdat2$SalePrice, 
+                 LotArea=newdat2$LotArea,
+                 OverallCond=newdat2$OverallCond,
+                 HouseStyle_coded1.5Unf=as.numeric(newdat2$HouseStyle_coded=="1.5Unf"),
+                 HouseStyle_coded1Story=as.numeric(newdat2$HouseStyle_coded=="1Story"),
+                 HouseStyle_coded2.5Fin=as.numeric(newdat2$HouseStyle_coded=="2.5Fin"),
+                 HouseStyle_coded2.5Unf=as.numeric(newdat2$HouseStyle_coded=="2.5Unf"),
+                 HouseStyle_coded2Story=as.numeric(newdat2$HouseStyle_coded=="2Story"),
+                 HouseStyle_codedSFoyer=as.numeric(newdat2$HouseStyle_coded=="SFoyer"),
+                 HouseStyle_codedSLvl=as.numeric(newdat2$HouseStyle_coded=="SLvl"),
+                 TotRmsAbvGrd=dat2$TotRmsAbvGrd,
+                 n=nrow(newdat2)) 
+
+params1 = c("b0","b", "sig")
+
+inits1 = function() {
+    inits = list("b0"=rnorm(1,0.0,100.0), "b"=rnorm(10,0.0,100.0), "prec"=rgamma(1,1.0,1.0))
+}
+
+mod2_jags = jags.model(textConnection(mod2_jags_string), data=data_jags, inits=inits1, n.chains=3)
+```
+
+
+```{r}
+update(mod2_jags, 1000) # burn-in
+
+mod2_jags_sim = coda.samples(model=mod2_jags,
+                        variable.names=params1,
+                        n.iter=5000)
+
+mod2_jags_csim = do.call(rbind, mod2_jags_sim) # combine multiple chains
+```
+
+```{r}
+plot(mod2_jags_sim)
+gelman.diag(mod2_jags_sim)
+autocorr.diag(mod2_jags_sim)
+autocorr.plot(mod2_jags_sim)
+effectiveSize(mod2_jags_sim)
+dic.samples(mod1_jags, n.iter=1e3)
+dic.samples(mod2_jags, n.iter=1e3)
+```
+
+Upon examination of the deviance information criterion (DIC), the penalized deviance of the second model (which incorporates `TotRmsAbvGrd`) is lower than the first model.  We conclude that the second model is a better fit (and predictor) for the data.
